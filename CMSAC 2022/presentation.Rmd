@@ -3,9 +3,11 @@ title: "**A Regularized Adjusted Plus-Minus Model in Soccer**"
 subtitle: "**with Box Score Prior**"
 author: "**Boyuan Zhang (New York University)**"
 institute: 
-  - "Collaborators: Phong Hoang (Denison University), Edvin Tran Hoac (Wesleyan University)"
-  - "Advisors: Prof. Ron Yurko (CMU), Prof. Kostas Pelechrinis (UPitt)"
-date: "Ocatober 4, 2022"
+  - "<br />Collaborators: Phong Hoang (Denison), Edvin Tran Hoac (Wesleyan)"
+  - "Advisors: Prof. Kostas Pelechrinis (UPitt), Prof. Ron Yurko (CMU)"
+date: 
+  - "<br />Carnegie Mellon Sports Analytics Conference"
+  - "<br />October 29, 2022"
 output:
   xaringan::moon_reader:
     css: ["default", "nyu-metro.css", "metropolis-fonts"]
@@ -41,7 +43,7 @@ style_duo_accent(
 
 class: inverse center middle
 
-# How to evaluate the impact of individual players on their team’s performance?
+# How to evaluate the impact of individual players on their team’s performance within a period of time?
 
 ---
 
@@ -125,7 +127,7 @@ $$\beta^* = \arg \min_{\beta} ||\Delta S - tX\beta||_2^2 + \lambda||\beta||_2^2$
 
 # Problematic Nature of Soccer
 
-```{r scoring_vs_subs, eval=TRUE, out.width="50%", out.height="50%", fig.align = 'center', warning=FALSE, message=FALSE, echo=FALSE}
+```{r scoring_vs_subs, eval=TRUE, out.width="50%", out.height="50%", fig.align = 'center', warning=FALSE, message=FALSE, echo=FALSE, fig.cap="Matano, et al (2018). Augmenting adjusted plus-minus in soccer with FIFA ratings."}
 knitr::include_graphics("https://www.intraocular.net/posts/how-augmented-apm-works/scoring_vs_subs_sports-1.png")
 ```
 
@@ -138,7 +140,7 @@ knitr::include_graphics("https://www.intraocular.net/posts/how-augmented-apm-wor
 
 # Current State of Socceer Player Rating
 
-## Player ratings based on actions in a game
+## Action-based Player Ratings
 
 .center[![](image/action_based_player_rating.png)]
 
@@ -146,7 +148,7 @@ knitr::include_graphics("https://www.intraocular.net/posts/how-augmented-apm-wor
 
 # Current State of Socceer Player Rating
 
-## Video game player ratings
+## Video Game Player Ratings
 
 .center[![](image/video_game_player_rating.png)]
 
@@ -166,7 +168,25 @@ knitr::include_graphics("image/augumented_apm.png")
 
 ---
 
-# Model Structure
+# RAxGPM with Box Score Prior
+
+## Previous Formula:
+
+$$\beta^* = \arg \min_{\beta} ||\Delta G - tX\beta||_2^2 + \lambda||\beta||_2^2$$
+## New Formula:
+
+$$\beta^* = \arg \min_{\beta} ||\Delta \mathbb{xG} - tX\beta||_2^2 + \lambda||\beta - \beta_{prior}||_2^2$$
+  - $\Delta \mathbb{xG}$: Expected Goal differential, $\mathbb{xG}_{home} - \mathbb{xG}_{away}$
+  - $\beta_{prior}$: Prior value for each player learned from **box score data**
+
+## Idea:
+
+  - More frequent response variable
+  - Less collinearity between players
+
+---
+
+# Model Pipeline
 
 .center[![](image/structure.png)]
 
@@ -193,10 +213,68 @@ class: inverse center middle
 
 # Data: Prior Stage
 
-## FIFA Ratings 2022 Data: before starts of 2021-22 season
+## Number of Players by Position Group
 
-```{r fifa_rating_distribution, eval=TRUE, out.width="60%", out.height="60%", fig.align = 'center', warning=FALSE, message=FALSE, echo=FALSE}
-knitr::include_graphics("image/FIFA_rating_distribution.png")
+```{r number_by_position, warning=FALSE, message=FALSE, echo=FALSE}
+library(tidyverse)
+prior <- read_csv("data/prior.csv")
+rating <- read_csv("data/eng1_2122_singleapm_rating.csv")
+eng2122 <- read_csv("data/eng2122_boxscores.csv")
+
+DF <- c("DF", "DF,MF", "DF,FW")
+MF <- c("MF,DF", "MF", "MF,FW")
+FW <- c("FW,DF", "FW", "FW,MF")
+
+player_team <- eng2122 %>%
+  select(Player, Squad, Pos) %>%
+  rename(Team = Squad) 
+
+player_team$Pos <- replace(player_team$Pos, player_team$Pos %in% DF, "DF") 
+player_team$Pos <- replace(player_team$Pos, player_team$Pos %in% MF, "MF") 
+player_team$Pos <- replace(player_team$Pos, player_team$Pos %in% FW, "FW") 
+
+player_team %>% ggplot(aes(x = Pos)) + 
+  geom_bar(fill = "purple", alpha = 0.6) +
+  geom_text(stat = "count", aes(label = ..count..), vjust = -0.5) +
+  scale_x_discrete(limit = c("GK", "DF", "MF", "FW")) +
+  labs(title = "Number of Players by Position Group") +
+  theme_bw() +
+  theme(plot.title = element_text(hjust = 0.5))
+
+```
+
+---
+
+# Model Training: Prior
+
+## Feature Importance in Prior Value by Position
+
+.center[![](image/feature_importance.png)]
+
+
+---
+
+# Model Training: Prior
+
+## Comparing between FIFA rating and Prior value distribution
+
+```{r fifa_rating_prior_distribution, warning=FALSE, message=FALSE, echo=FALSE}
+library(cowplot)
+
+FIFA_distribution <- prior %>% ggplot(aes(x = adj_overall, y = ..density..)) + 
+  geom_histogram(fill = "#ab82c5", alpha= 0.5) +
+  geom_density(color = "purple") +
+  labs(x = "FIFA Rating") +
+  theme_bw()
+
+prior_distribution <- prior %>% filter(total_min >= 900) %>%
+  ggplot(aes(x = weighted_pred, y = ..density..)) + 
+  geom_histogram(fill = "#ab82c5", alpha= 0.5) +
+  geom_density(color = "purple") +
+  labs(x = "Prior Value") +
+  theme_bw()
+
+plot_grid(FIFA_distribution, prior_distribution, axis = "lr")
 ```
 
 ---
@@ -230,13 +308,13 @@ knitr::include_graphics("image/stint_distribution.png")
 
 ---
 
-# Model Training
+# Model Training: RAPM
 
 .center[![](image/model_training_1.png)]
 
 ---
 
-# Model Training
+# Model Training: RAPM
 
 .center[![](image/model_training_2.png)]
 
@@ -261,21 +339,158 @@ knitr::include_graphics("image/comparison_result.png")
 
 ---
 
-# Model Testing: Interpretability
+```{r eval=TRUE, warning=FALSE, message=FALSE, echo=FALSE}
+new_prior <- prior %>%
+  select(Player, total_min, adj_overall, adj_scaled, weighted_pred, pred_scaled) %>%
+  left_join(player_team, by = "Player") %>%
+  rename(Min = total_min,
+         FIFA = adj_overall,
+         FIFA_scaled = adj_scaled,
+         Box = weighted_pred,
+         Box_scaled = pred_scaled)
 
-```{r result_table, eval=TRUE, out.width="58%", out.height="58%", fig.align = 'center', warning=FALSE, message=FALSE, echo=FALSE}
-knitr::include_graphics("image/result_table.png")
+FIFA_table <- new_prior %>%
+  select(-Box, -Box_scaled) %>%
+  left_join(select(rating, c(Player, FIFA_coef, FIFA_rating))) %>%
+  select(Player, Team, Pos, Min, FIFA, FIFA_rating) %>%
+  arrange(desc(FIFA_rating)) 
+
+box_table <- new_prior %>%
+  select(-FIFA, -FIFA_scaled) %>%
+  left_join(select(rating, c(Player, box_coef, box_rating))) %>%
+  select(Player, Team, Pos, Min, Box, box_rating) %>%
+  arrange(desc(box_rating))
+
+master_table <- FIFA_table %>% 
+  left_join(select(box_table, c(Player, Team, Box, box_rating)),
+             by = c("Player", "Team"))
+```
+
+```{r result table, results='hide', fig.show='hide', eval=TRUE, warning=FALSE, message=FALSE, echo=FALSE}
+
+library(gt)
+
+master_table %>%
+  arrange(desc(box_rating)) %>%
+  gt(rownames_to_stub = TRUE) %>%
+  data_color(
+    columns = c(FIFA_rating, box_rating),
+    colors = scales::col_numeric(
+      palette(c("#eee6f3", "#ab82c5", "#7b5aa6", "#702b9d", "#330662")),
+      domain = NULL)(sort(rexp(5))),
+    alpha = 0.8
+  )
+
+```
+
+# Result: Top 10 Players
+
+
+```{r top_10, eval=TRUE, warning=FALSE, message=FALSE, echo=FALSE}
+
+library(gt)
+
+# top 20
+master_table %>%
+  arrange(desc(box_rating)) %>%
+  head(10) %>%
+  gt(rownames_to_stub = TRUE) %>%
+  data_color(
+    columns = c(FIFA_rating, box_rating),
+    colors = scales::col_numeric(
+      palette(c("#eee6f3", "#ab82c5", "#7b5aa6", "#702b9d", "#330662")),
+      domain = NULL)(sort(rexp(5))),
+    alpha = 0.8
+  )
 ```
 
 ---
 
-# Conclusion
+# Result: Top 10-20 Players
 
-- This project introduces a new kind of **Regularized Adjusted Expected Goal Plus-Minus model (RAxGPM)** in soccer to evaluate players’ performance and contribution, in which we incorporate **priors generated from box-score data** into a regularized regression framework. We’ve also decided to use **expected goals differential per 90** as the response variable in order to increase the predictability of our model and have a more frequent response variable compared to actual goals.
 
-- Unlike previous work that has employed a Bayesian framework, our model is only performing a **point estimation** on the response variable through a regularized linear model with a prior, which does not require any assumption on the prior distribution.
+```{r top_10_20, eval=TRUE, warning=FALSE, message=FALSE, echo=FALSE}
 
-- We have also shown that the RAxGPM model with the prior we created from box score data has **better out-of-sample prediction accuracy** than the RAxGPM model with FIFA rating as prior, and without any prior, which proves that by incorporating box score data, we are indeed adding more valuable information to our model.
+library(gt)
+
+# top 20
+master_table %>%
+  arrange(desc(box_rating)) %>%
+  slice(11:20) %>%
+  gt(rownames_to_stub = TRUE) %>%
+  data_color(
+    columns = c(FIFA_rating, box_rating),
+    colors = scales::col_numeric(
+      palette(c("#eee6f3", "#ab82c5", "#7b5aa6", "#702b9d", "#330662")),
+      domain = NULL)(sort(rexp(5))),
+    alpha = 0.8
+  )
+```
+
+---
+
+# Result: Bottom 10 Players
+
+```{r bottom_10, warning=FALSE, message=FALSE, echo=FALSE}
+master_table %>%
+  arrange(box_rating) %>%
+  head(10) %>%
+  gt(rownames_to_stub = TRUE) %>%
+  data_color(
+    columns = c(FIFA_rating, box_rating),
+    colors = scales::col_numeric(
+      palette(c("#eee6f3", "#ab82c5", "#7b5aa6", "#702b9d", "#330662")),
+      domain = NULL)(sort(rexp(5))),
+    alpha = 0.8
+  )
+```
+
+---
+
+# Model Comparison
+
+## Relation
+
+```{r output_relation,warning=FALSE, message=FALSE, echo=FALSE}
+master_table %>% ggplot(aes(x = FIFA_rating, y = box_rating)) +
+  geom_point(color = "purple", alpha = 0.5) + xlim(-0.25, 0.25) + ylim(-0.25, 0.25) + 
+  theme_bw() + coord_fixed()
+```
+
+
+---
+
+# Model Comparison
+
+## Distribution 
+
+```{r output_comparison, warning=FALSE, message=FALSE, echo=FALSE}
+master_table %>% ggplot() +
+  geom_density(aes(x = FIFA_rating), color = "#1E0635") +
+  geom_density(aes(x = box_rating), color = "#fb0f78") +
+  xlim(-0.2, 0.2) +
+  labs(x = "Rating", title = "Distribution of Model Output") +
+  theme_bw() +
+  theme(plot.title = element_text(hjust = 0.5))
+```
+
+---
+
+# Observation
+
+## Position Value
+
+```{r output_position, warning=FALSE, message=FALSE, echo=FALSE}
+master_table %>% 
+  filter(!is.na(Pos)) %>%
+  ggplot(aes(x = Pos, y = box_rating)) +
+  geom_violin(fill = "#ab82c5") +
+  geom_boxplot(width = 0.2, color = "#330662") +
+  scale_x_discrete(limit = c("GK", "DF", "MF", "FW")) +
+  labs(title = "Comparing Model Output Across Position") +
+  theme_bw() +
+  theme(plot.title = element_text(hjust = 0.5))
+```
 
 ---
 
@@ -316,3 +531,6 @@ knitr::include_graphics("image/result_table.png")
 class: inverse center middle
 
 # Thanks!
+
+<br />
+[@GaryBoyuanZhang](https://twitter.com/GaryBoyuanZhang)
